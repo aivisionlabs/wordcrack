@@ -128,14 +128,27 @@ export function loadWordsCached(userId: string): Word[] {
  * Throws on network errors so the caller can keep showing cached data.
  */
 export async function pullWords(userId: string): Promise<Word[]> {
-  const { data, error } = await supabase.from('words').select('*').order('sort_order');
-  if (error) throw error;
+  // PostgREST caps a single response at 1000 rows, so page through the table
+  // until we've pulled everything — otherwise only the first letters survive.
+  const PAGE = 1000;
+  const rows: WordRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('words')
+      .select('*')
+      .order('sort_order')
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...(data as WordRow[]));
+    if (data.length < PAGE) break;
+  }
 
   const content =
-    data && data.length
-      ? (data as WordRow[]).map(rowToContent)
+    rows.length > 0
+      ? rows.map(rowToContent)
       : readContentCache() ?? seedContent();
-  if (data && data.length) writeContentCache(content);
+  if (rows.length > 0) writeContentCache(content);
 
   const progress = applyPendingToProgress(userId, readProgressCache(userId));
   return merge(content, progress);

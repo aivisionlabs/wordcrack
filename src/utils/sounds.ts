@@ -1,3 +1,5 @@
+import { isSoundEffectsEnabled } from './speech';
+
 const SOUND_URLS = {
   cardSwipe: "/sound/card-swipe.mp3",
   mastered: "/sound/mastered.mp3",
@@ -20,6 +22,8 @@ function getAudio(name: SoundName): HTMLAudioElement {
 
 /** Play a short UI sound effect from `public/sound/`. */
 export function playSound(name: SoundName) {
+  if (!isSoundEffectsEnabled()) return;
+
   try {
     const audio = getAudio(name);
     audio.currentTime = 0;

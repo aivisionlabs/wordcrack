@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useState,
   useEffect,
   useLayoutEffect,
@@ -8,6 +9,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Word, WordFlags } from "../types";
+import { UNIT_SIZE, unitWordRange } from "../data/units";
+import ConfettiBurst from "./ConfettiBurst";
 import { speakWord } from "../utils/speech";
 import { playSound } from "../utils/sounds";
 import { isWordUnseen } from "../utils/wordStatus";
@@ -16,6 +19,7 @@ import {
   DefinitionsList,
   WordEtymology,
 } from "./DefinitionsList";
+import { formatDefinitions } from "../utils/wordContent";
 import {
   Volume2,
   CheckCircle,
@@ -83,8 +87,14 @@ const BROWSE_COACH_STEPS: CoachMarkTourStep[] = [
 interface BrowseViewProps {
   words: Word[];
   selectedLetter: string;
+  /** When set, restrict the stack to a single unit of the letter. */
+  unitNumber: number | null;
   resumeWordId: string | null;
   onSetSelectedLetter: (letter: string) => void;
+  /** Drop the unit scope and show the whole letter. */
+  onClearUnitScope: () => void;
+  /** Leave the unit and return to the learning path home. */
+  onGoHome: () => void;
   onSetFlags: (wordId: string, flags: Partial<WordFlags>) => void;
   onMarkViewed: (wordId: string) => void;
   onCurrentWordChange: (wordId: string | null) => void;
@@ -166,8 +176,11 @@ function highlightWord(sentence: string, target: string) {
 export default function BrowseView({
   words,
   selectedLetter,
+  unitNumber,
   resumeWordId,
   onSetSelectedLetter,
+  onClearUnitScope,
+  onGoHome,
   onSetFlags,
   onMarkViewed,
   onCurrentWordChange,
@@ -181,8 +194,22 @@ export default function BrowseView({
   const [exitFlipped, setExitFlipped] = useState(false);
   const [iconFlies, setIconFlies] = useState<IconFly[]>([]);
   const [showBrowseTour, setShowBrowseTour] = useState(false);
+  // A momentary "Unit N completed" celebration (confetti + toast).
+  const [celebration, setCelebration] = useState<{
+    id: number;
+    unitNumber: number;
+  } | null>(null);
   const flyIdRef = useRef(0);
+  const celebrationIdRef = useRef(0);
+  const celebrationTimer = useRef<number | null>(null);
   const skipSaveAfterRestoreRef = useRef(false);
+
+  useEffect(
+    () => () => {
+      if (celebrationTimer.current) window.clearTimeout(celebrationTimer.current);
+    },
+    [],
+  );
 
   // Tracks a pointer gesture on the (flipped) back face so we can tell a
   // navigation flick apart from a content scroll. Framer's drag="y" can't
@@ -192,11 +219,20 @@ export default function BrowseView({
   const backTouchGesture = useRef<BackGesture | null>(null);
   const suppressClick = useRef(false);
 
-  // Every word for the letter stays in the stack regardless of its flags —
-  // navigation is swipe-only, so marking a word never removes it or advances.
-  const filteredWords = words
-    .filter((w) => w.word.toUpperCase().startsWith(selectedLetter))
-    .sort((a, b) => a.word.localeCompare(b.word));
+  // Apply the optional unit scope to an already letter-filtered, sorted list.
+  const scopeToUnit = (letterWords: Word[]) => {
+    if (unitNumber == null) return letterWords;
+    const [start, end] = unitWordRange(unitNumber);
+    return letterWords.slice(start, end);
+  };
+
+  // Every word for the letter (or unit) stays in the stack regardless of its
+  // flags — navigation is swipe-only, so marking a word never removes it.
+  const filteredWords = scopeToUnit(
+    words
+      .filter((w) => w.word.toUpperCase().startsWith(selectedLetter))
+      .sort((a, b) => a.word.localeCompare(b.word)),
+  );
 
   const total = filteredWords.length;
   const lettersTotal = total;
@@ -209,9 +245,11 @@ export default function BrowseView({
   useLayoutEffect(() => {
     setIsFlipped(false);
     skipSaveAfterRestoreRef.current = true;
-    const letterWords = words
-      .filter((w) => w.word.toUpperCase().startsWith(selectedLetter))
-      .sort((a, b) => a.word.localeCompare(b.word));
+    const letterWords = scopeToUnit(
+      words
+        .filter((w) => w.word.toUpperCase().startsWith(selectedLetter))
+        .sort((a, b) => a.word.localeCompare(b.word)),
+    );
 
     if (letterWords.length === 0) {
       setFocusIndex(0);
@@ -223,8 +261,8 @@ export default function BrowseView({
       return;
     }
     setFocusIndex(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only restore on letter/resume, not every progress tick
-  }, [selectedLetter, resumeWordId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only restore on letter/unit/resume, not every progress tick
+  }, [selectedLetter, unitNumber, resumeWordId]);
 
   // When a word leaves the stack (marked Learned) the list shrinks; clamp the
   // focus so we never point past the end and the next word slides into view.
@@ -310,7 +348,35 @@ export default function BrowseView({
       playSound("mastered");
       flyIconToTab("mastered", source);
       dismissBrowseTourIfActive();
+      maybeCelebrateUnit(word);
     }
+  };
+
+  // Fire a confetti + "Unit N completed" toast if mastering `word` finishes the
+  // unit it belongs to. `words` is still pre-update here (the master is applied
+  // optimistically by the parent), so we treat `word` itself as just-mastered.
+  const maybeCelebrateUnit = (word: Word) => {
+    const letterWords = words
+      .filter((w) => w.word.toUpperCase().startsWith(selectedLetter))
+      .sort((a, b) => a.word.localeCompare(b.word));
+    const idx = letterWords.findIndex((w) => w.id === word.id);
+    if (idx < 0) return;
+
+    const unitNo = Math.floor(idx / UNIT_SIZE) + 1;
+    const [start, end] = unitWordRange(unitNo);
+    const unitWords = letterWords.slice(start, end);
+    const completesUnit =
+      unitWords.length > 0 &&
+      unitWords.every((w) => (w.id === word.id ? true : w.mastered));
+    if (!completesUnit) return;
+
+    celebrationIdRef.current += 1;
+    setCelebration({ id: celebrationIdRef.current, unitNumber: unitNo });
+    if (celebrationTimer.current) window.clearTimeout(celebrationTimer.current);
+    celebrationTimer.current = window.setTimeout(
+      () => setCelebration(null),
+      2000,
+    );
   };
 
   const toggleTough = (word: Word, source: HTMLElement) => {
@@ -553,6 +619,28 @@ export default function BrowseView({
 
   return (
     <div id="browse_tab" className="relative h-full flex flex-col bg-white">
+      {/* ------------------------------------------------- Unit-complete celebration */}
+      {celebration && (
+        <Fragment key={celebration.id}>
+          <ConfettiBurst />
+        </Fragment>
+      )}
+      <AnimatePresence>
+        {celebration && (
+          <motion.div
+            key={celebration.id}
+            initial={{ opacity: 0, y: -10, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.92 }}
+            transition={{ type: "spring", damping: 20, stiffness: 280 }}
+            className="absolute top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none bg-success-vibrant text-white text-sm font-extrabold px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2 whitespace-nowrap"
+          >
+            <CheckCircle className="w-4 h-4" />
+            Unit {celebration.unitNumber} completed
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ------------------------------------------------- In-card header (hidden while card is flipped) */}
       {!isFlipped && (
         <div className="px-5 pt-4 pb-2 shrink-0">
@@ -563,21 +651,39 @@ export default function BrowseView({
               </span>
             </div>
 
-            <button
-              type="button"
-              data-coach="browse-letter"
-              onClick={() => setShowLetters(true)}
-              className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full pl-3.5 pr-2.5 py-1.5 text-sm font-bold text-text-primary hover:bg-gray-100 transition-colors cursor-pointer"
-            >
-              <span>{selectedLetter}</span>
-              <ChevronDown className="w-4 h-4 text-gray-500" />
-            </button>
+            <div className="flex items-center gap-2">
+              {unitNumber != null && (
+                <button
+                  type="button"
+                  onClick={onClearUnitScope}
+                  className="text-[11px] font-bold uppercase tracking-wider text-primary hover:underline cursor-pointer"
+                  title="Show every word for this letter"
+                >
+                  View all
+                </button>
+              )}
+              <button
+                type="button"
+                data-coach="browse-letter"
+                onClick={() =>
+                  unitNumber != null ? onGoHome() : setShowLetters(true)
+                }
+                className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-full pl-3.5 pr-2.5 py-1.5 text-sm font-bold text-text-primary hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                <span>
+                  {selectedLetter}
+                  {unitNumber != null ? ` · Unit ${unitNumber}` : ""}
+                </span>
+                <ChevronDown className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
           </div>
 
           {/* Progress + front-mode toggles */}
           <div className="flex items-center gap-3 mt-3">
             <div className="flex-1">
               <p className="text-[11px] font-bold tracking-wider uppercase text-primary mb-1.5">
+                {unitNumber != null ? `Unit ${unitNumber} · ` : ""}
                 {masteredInLetter} / {lettersTotal} Mastered ({percentage}%)
               </p>
               <div className="h-1.5 w-full bg-gray-150 rounded-full overflow-hidden">
@@ -704,13 +810,9 @@ export default function BrowseView({
                   </span>
 
                   {showDefinition && (
-                    <div className="w-full max-w-[300px] mt-2">
-                      <DefinitionsList
-                        definitions={current.definitions}
-                        variant="front"
-                        numbered={false}
-                      />
-                    </div>
+                    <p className="text-sm text-gray-600 line-clamp-2 max-w-[300px] mt-2 font-medium">
+                      {formatDefinitions(current.definitions)}
+                    </p>
                   )}
                 </div>
 
@@ -725,7 +827,7 @@ export default function BrowseView({
                       e.stopPropagation();
                       toggleMastered(current, e.currentTarget);
                     }}
-                    className={`w-11 h-11 rounded-full border-2 shadow-md flex items-center justify-center transition-colors cursor-pointer active:scale-95 ${
+                    className={`w-14 h-14 rounded-full border-2 shadow-md flex items-center justify-center transition-colors cursor-pointer active:scale-95 ${
                       current.mastered
                         ? "bg-success-vibrant/90 border-success-vibrant text-white"
                         : "bg-white/70 border-success-vibrant/70 text-success-vibrant hover:bg-success-vibrant hover:text-white"
@@ -743,7 +845,7 @@ export default function BrowseView({
                         e.stopPropagation();
                         toggleTough(current, e.currentTarget);
                       }}
-                      className={`w-11 h-11 rounded-full border-2 shadow-md flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                      className={`w-14 h-14 rounded-full border-2 shadow-md flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
                         current.toughNut
                           ? "bg-warning-vibrant/90 border-warning-vibrant text-white"
                           : "bg-white/70 border-warning-vibrant/70 text-warning-vibrant hover:bg-warning-vibrant hover:text-white"
@@ -821,11 +923,9 @@ export default function BrowseView({
                 >
                   <section className="space-y-2">
                     <DefinitionsHeading count={current.definitions.length} />
-                    <DefinitionsList
-                      definitions={current.definitions}
-                      variant="detail"
-                      numbered={false}
-                    />
+                    <p className="text-sm text-text-secondary leading-relaxed">
+                      {formatDefinitions(current.definitions)}
+                    </p>
                   </section>
 
                   {current.examples.length > 0 && (
@@ -895,7 +995,7 @@ export default function BrowseView({
                       e.stopPropagation();
                       toggleMastered(current, e.currentTarget);
                     }}
-                    className={`w-11 h-11 rounded-full border-2 shadow-md flex items-center justify-center transition-colors cursor-pointer active:scale-95 ${
+                    className={`w-14 h-14 rounded-full border-2 shadow-md flex items-center justify-center transition-colors cursor-pointer active:scale-95 ${
                       current.mastered
                         ? "bg-success-vibrant/90 border-success-vibrant text-white"
                         : "bg-white/70 border-success-vibrant/70 text-success-vibrant hover:bg-success-vibrant hover:text-white"
@@ -913,7 +1013,7 @@ export default function BrowseView({
                         e.stopPropagation();
                         toggleTough(current, e.currentTarget);
                       }}
-                      className={`w-11 h-11 rounded-full border-2 shadow-md flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                      className={`w-14 h-14 rounded-full border-2 shadow-md flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
                         current.toughNut
                           ? "bg-warning-vibrant/90 border-warning-vibrant text-white"
                           : "bg-white/70 border-warning-vibrant/70 text-warning-vibrant hover:bg-warning-vibrant hover:text-white"
@@ -996,6 +1096,7 @@ export default function BrowseView({
             selectedLetter={selectedLetter}
             onSelectLetter={selectLetterFromBrowse}
             words={words}
+            disableWhen="none"
           />
         )}
       </AnimatePresence>

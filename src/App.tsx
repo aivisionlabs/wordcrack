@@ -11,6 +11,7 @@ import {
   touchStreak,
 } from "./data/auth";
 import { setProgressFlags, markWordViewed, initSync, teardownSync } from "./data/sync";
+import { getDailyMastered, recordMasteredDelta } from "./data/daily";
 import { logger } from "./utils/logger";
 import { formatDefinitions, wordMatchesDefinition } from "./utils/wordContent";
 import {
@@ -29,6 +30,7 @@ import SignupView from "./components/SignupView";
 import SignInView from "./components/SignInView";
 import LoadingView from "./components/LoadingView";
 import DashboardView from "./components/DashboardView";
+import LearningPathView from "./components/LearningPathView";
 import BrowseView from "./components/BrowseView";
 import MasteredView from "./components/MasteredView";
 import ToughNutView from "./components/ToughNutView";
@@ -87,6 +89,16 @@ export default function App() {
   const [words, setWords] = useState<Word[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("Home");
   const [selectedLetter, setSelectedLetter] = useState<string>("A");
+  // Letter shown on the learning path (defaults to the continue letter, but the
+  // user can switch it from the progress panel without leaving Home).
+  const [pathLetter, setPathLetter] = useState<string>("A");
+  const [dailyMastered, setDailyMastered] = useState(0);
+  // When set, Browse is scoped to a single unit of `letter` instead of the
+  // whole letter (set by tapping a unit on the learning path).
+  const [browseScope, setBrowseScope] = useState<{
+    letter: string;
+    unitNumber: number;
+  } | null>(null);
   const [activeCoachMark, setActiveCoachMark] = useState<CoachMarkStep | null>(
     null,
   );
@@ -145,6 +157,9 @@ export default function App() {
     setProfile(prof);
     setWords(cachedWords); // instant paint from cache / seed
     setSelectedLetter(initialContinue?.letter ?? "A");
+    setPathLetter(initialContinue?.letter ?? "A");
+    setBrowseScope(null);
+    setDailyMastered(getDailyMastered(uid));
     setContinueTarget(initialContinue);
     setActiveTab("Home");
     setView("app");
@@ -312,6 +327,13 @@ export default function App() {
           mastered: w.mastered,
           toughNut: w.toughNut,
         });
+
+      // Keep today's mastered count in sync on each mastered on/off transition.
+      if (flags.mastered === true && !prev?.mastered) {
+        setDailyMastered(recordMasteredDelta(userId, 1));
+      } else if (flags.mastered === false && prev?.mastered) {
+        setDailyMastered(recordMasteredDelta(userId, -1));
+      }
     }
 
     // Contextual coachmarks after the user's first mastered / tough-nut mark.
@@ -362,6 +384,19 @@ export default function App() {
 
   const selectLetter = (letter: string) => {
     setSelectedLetter(letter);
+    setBrowseScope(null); // changing letters always drops any unit scope
+  };
+
+  // Tapping a unit on the learning path opens Browse scoped to that unit's
+  // words. setSelectedLetter directly (not selectLetter) so the scope survives.
+  const navigateToUnit = (letter: string, unitNumber: number) => {
+    setSelectedLetter(letter);
+    setBrowseScope({ letter, unitNumber });
+    setActiveTab("Browse");
+  };
+
+  const handlePathSelectLetter = (letter: string) => {
+    setPathLetter(letter);
   };
 
   useEffect(() => {
@@ -422,6 +457,10 @@ export default function App() {
 
   const masteredTotalCount = words.filter((w) => w.mastered).length;
 
+  // First-time users (no word seen or mastered yet) get the alphabet Dashboard.
+  // Once they've started learning any letter, Home becomes the unit path.
+  const hasStartedLearning = words.some((w) => w.viewed || w.mastered);
+
   // -------------------------------------------------- Pre-app screens
   if (view === "loading") return <LoadingView />;
   if (view === "splash")
@@ -452,7 +491,12 @@ export default function App() {
     );
 
   // -------------------------------------------------- Main app shell
-  const immersive = activeTab === "Browse" || activeTab === "Mastered";
+  const immersive =
+    activeTab === "Home" ||
+    activeTab === "Browse" ||
+    activeTab === "Mastered" ||
+    activeTab === "Tough Nut" ||
+    activeTab === "Profile";
   const initial = (profile?.fullName?.trim()?.[0] ?? "I").toUpperCase();
 
   return (
@@ -461,8 +505,8 @@ export default function App() {
       {!immersive && (
         <header className="fixed top-0 w-full max-w-[600px] h-14 z-50 bg-primary text-white shadow-sm flex items-center justify-between px-4 left-1/2 -translate-x-1/2">
           <div className="flex items-center select-none">
-            <div className="px-2.5 h-9 bg-white rounded-xl flex items-center justify-center shadow-sm">
-              <span className="font-serif text-primary text-base font-black leading-none tracking-tight">
+            <div className="px-2.5 h-9 bg-primary rounded-xl flex items-center justify-center shadow-sm">
+              <span className="font-serif text-white text-base font-black leading-none tracking-tight">
                 InstaGRE
               </span>
             </div>
@@ -582,21 +626,40 @@ export default function App() {
 
         {/* Views */}
         <main className={immersive ? "flex-1 min-h-0" : "flex-1 p-4"}>
-          {activeTab === "Home" && (
-            <DashboardView
-              words={words}
-              streak={streak}
-              continueLetter={continueTarget?.letter ?? null}
-              onLetterSelect={navigateToLetterBrowse}
-            />
-          )}
+          {activeTab === "Home" &&
+            (hasStartedLearning ? (
+              <LearningPathView
+                words={words}
+                activeLetter={pathLetter}
+                dailyMastered={dailyMastered}
+                onSelectLetter={handlePathSelectLetter}
+                onStartUnit={navigateToUnit}
+              />
+            ) : (
+              <DashboardView
+                words={words}
+                streak={streak}
+                continueLetter={continueTarget?.letter ?? null}
+                onLetterSelect={navigateToLetterBrowse}
+              />
+            ))}
 
           {activeTab === "Browse" && (
             <BrowseView
               words={words}
               selectedLetter={selectedLetter}
+              unitNumber={
+                browseScope?.letter === selectedLetter
+                  ? browseScope.unitNumber
+                  : null
+              }
               resumeWordId={browseResumeWordId}
               onSetSelectedLetter={selectLetter}
+              onClearUnitScope={() => setBrowseScope(null)}
+              onGoHome={() => {
+                setBrowseScope(null);
+                setActiveTab("Home");
+              }}
               onSetFlags={handleSetFlags}
               onMarkViewed={handleMarkViewed}
               onCurrentWordChange={handleBrowseCurrentWordChange}
@@ -807,15 +870,24 @@ export default function App() {
       )}
 
       {/* Contextual first-run coachmarks */}
-      {activeCoachMark === "home" && (
-        <CoachMarkSpotlight
-          target="[data-coach='home-alphabet']"
-          title="Pick a letter to start"
-          body="Tap any letter to browse vocabulary flashcards. Your progress is tracked per letter green means you've mastered them all."
-          placement="bottom"
-          onDismiss={() => dismissCoachMark("home")}
-        />
-      )}
+      {activeCoachMark === "home" &&
+        (hasStartedLearning ? (
+          <CoachMarkSpotlight
+            target="[data-coach='path-active-unit']"
+            title="Start your next unit"
+            body="Words are grouped into bite-sized units. Tap the highlighted unit to start learning — finish it to unlock the next one."
+            placement="bottom"
+            onDismiss={() => dismissCoachMark("home")}
+          />
+        ) : (
+          <CoachMarkSpotlight
+            target="[data-coach='home-alphabet']"
+            title="Pick a letter to start"
+            body="Tap any letter to browse vocabulary flashcards. Your progress is tracked per letter — green means you've mastered them all."
+            placement="bottom"
+            onDismiss={() => dismissCoachMark("home")}
+          />
+        ))}
       {activeCoachMark === "mastered-tab" && (
         <CoachMarkSpotlight
           target="[data-coach-nav='Mastered']"

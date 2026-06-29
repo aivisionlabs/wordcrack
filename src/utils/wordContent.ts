@@ -1,6 +1,6 @@
 /** Join definitions for compact display (search snippets, list previews). */
 export function formatDefinitions(definitions: string[]): string {
-  return definitions.join('; ');
+  return definitions.join(', ');
 }
 
 /** First sense — used for quizzes and one-line previews. */

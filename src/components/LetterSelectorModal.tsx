@@ -23,8 +23,11 @@ interface LetterSelectorModalProps {
   selectedLetter: string;
   onSelectLetter: (letter: string) => void;
   words: Word[];
-  /** Disable tiles with no dictionary words (Browse) or no mastered words (Mastered). */
-  disableWhen?: "no-words" | "no-mastered";
+  /**
+   * Disable tiles with no dictionary words (Browse), no mastered words
+   * (Mastered), or never (the learning-path progress panel).
+   */
+  disableWhen?: "no-words" | "no-mastered" | "none";
   heading?: string;
   subheading?: string;
 }
@@ -74,7 +77,11 @@ export default function LetterSelectorModal({
             const { count, mastered, pct } = letterStats(words, letter);
             const isSelected = selectedLetter === letter;
             const isEmpty =
-              disableWhen === "no-mastered" ? mastered === 0 : count === 0;
+              disableWhen === "none"
+                ? false
+                : disableWhen === "no-mastered"
+                  ? mastered === 0
+                  : count === 0;
             return (
               <button
                 key={letter}

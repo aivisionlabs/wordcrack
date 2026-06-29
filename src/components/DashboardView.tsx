@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import { Word } from '../types';
-import { Award, Zap, ChevronRight, Lock, Check } from 'lucide-react';
+import { Award, Zap, ChevronRight, Check } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface DashboardViewProps {
@@ -86,7 +86,20 @@ export default function DashboardView({ words, streak, continueLetter, onLetterS
   };
 
   return (
-    <div id="dashboard_tab" className="space-y-6">
+    <div id="dashboard_tab" className="relative h-full flex flex-col bg-white">
+      {/* Header — consistent with other views */}
+      <div className="px-5 pt-5 pb-3 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="px-2.5 h-9 bg-primary rounded-xl flex items-center justify-center shadow-sm">
+            <span className="font-serif text-white text-base font-black leading-none tracking-tight">
+              InstaGRE
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto space-y-6 px-5">
       {/* Overall Mastery Card Banner */}
       <section className="bg-primary-container text-white p-6 rounded-2xl shadow-md relative overflow-hidden">
         <div className="absolute top-[-20px] right-[-20px] opacity-10">
@@ -153,27 +166,8 @@ export default function DashboardView({ words, streak, continueLetter, onLetterS
         <div className="grid grid-cols-4 gap-2.5">
           {alphabet.map((letter) => {
             const stats = getLetterStats(letter);
-            const isUnused = stats.total === 0;
             const isMastered = stats.total > 0 && stats.percentage === 100;
             const isContinue = continueLetter === letter;
-            
-            // Letters A-H are interactive, other letters can have a custom lock icon to represent progressive levels
-            const isLetterLocked = !['A', 'B', 'C', 'D'].includes(letter) && isUnused;
-
-            if (isLetterLocked) {
-              return (
-                <div
-                  key={letter}
-                  className="bg-[#f3f4f6] text-gray-400 group border border-gray-200/50 rounded-2xl flex flex-col items-center justify-center aspect-square p-2 select-none opacity-50"
-                  title="Alphabet locked. Save words here later!"
-                >
-                  <span className="font-serif text-lg font-semibold">{letter}</span>
-                  <div className="mt-1.5 text-gray-400/80">
-                    <Lock className="w-4 h-4" />
-                  </div>
-                </div>
-              );
-            }
 
             if (isMastered) {
               return (
@@ -214,6 +208,7 @@ export default function DashboardView({ words, streak, continueLetter, onLetterS
           })}
         </div>
       </section>
+      </div>
     </div>
   );
 }

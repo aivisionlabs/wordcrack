@@ -20,6 +20,7 @@ import {
   DefinitionsList,
   WordEtymology,
 } from "./DefinitionsList";
+import { formatDefinitions } from "../utils/wordContent";
 
 interface ToughNutViewProps {
   words: Word[];
@@ -152,16 +153,32 @@ export default function ToughNutView({ words, onSetFlags }: ToughNutViewProps) {
   return (
     <div
       id="tough_nut_tab"
-      className="relative flex flex-col bg-white rounded-2xl border border-warning-vibrant/15 overflow-hidden h-[calc(100vh-9rem)]"
+      className="relative flex flex-col bg-white h-full"
     >
+      {/* Header — same style as Mastered */}
+      <div className="px-5 pt-5 pb-3 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="px-2.5 h-9 bg-primary rounded-xl flex items-center justify-center shadow-sm">
+            <span className="font-serif text-white text-base font-black leading-none tracking-tight">
+              InstaGRE
+            </span>
+          </div>
+
+          <div className="text-sm font-bold text-text-primary">
+            {total === 0 ? "No Tough Nuts" : `${total} Tough Nut${total !== 1 ? 's' : ''}`}
+          </div>
+        </div>
+      </div>
+
       {/* ------------------------------------------------- Card stage */}
       {total === 0 || !current ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center px-8 text-gray-400 gap-2">
           <Smile className="w-12 h-12 stroke-1 text-gray-300" />
           <p className="text-sm font-bold text-gray-700">No Tough Nuts left!</p>
           <p className="text-xs text-gray-500 max-w-xs">
-            Flag tricky words with <Brain className="w-5 h-5" /> in Browse and
-            they'll show up here for focused drilling.
+            Flag tricky words in Browse using{" "}
+            <Brain className="w-3 h-3 inline-block" /> and they'll show up here
+            for focused drilling.
           </p>
         </div>
       ) : (
@@ -243,12 +260,9 @@ export default function ToughNutView({ words, onSetFlags }: ToughNutViewProps) {
                     {current.partOfSpeech}
                   </span>
 
-                  <div className="w-full max-w-[300px] mt-2">
-                    <DefinitionsList
-                      definitions={current.definitions}
-                      variant="front"
-                    />
-                  </div>
+                  <p className="text-sm text-gray-600 line-clamp-2 max-w-[300px] mt-2 font-medium">
+                    {formatDefinitions(current.definitions)}
+                  </p>
                 </div>
 
                 {/* Floating status actions */}
@@ -265,9 +279,7 @@ export default function ToughNutView({ words, onSetFlags }: ToughNutViewProps) {
                         : "bg-white/70 border-success-vibrant/70 text-success-vibrant hover:bg-success-vibrant hover:text-white"
                     }`}
                     title={
-                      current.mastered
-                        ? "Unmark Mastered"
-                        : "Mark as Mastered"
+                      current.mastered ? "Unmark Mastered" : "Mark as Mastered"
                     }
                   >
                     <CheckCircle className="w-5 h-5" />
@@ -349,10 +361,9 @@ export default function ToughNutView({ words, onSetFlags }: ToughNutViewProps) {
                 >
                   <section className="space-y-2">
                     <DefinitionsHeading count={current.definitions.length} />
-                    <DefinitionsList
-                      definitions={current.definitions}
-                      variant="detail"
-                    />
+                    <p className="text-sm text-text-secondary leading-relaxed">
+                      {formatDefinitions(current.definitions)}
+                    </p>
                   </section>
 
                   <WordEtymology etymology={current.etymology} />
@@ -427,9 +438,7 @@ export default function ToughNutView({ words, onSetFlags }: ToughNutViewProps) {
                         : "bg-white/70 border-success-vibrant/70 text-success-vibrant hover:bg-success-vibrant hover:text-white"
                     }`}
                     title={
-                      current.mastered
-                        ? "Unmark Mastered"
-                        : "Mark as Mastered"
+                      current.mastered ? "Unmark Mastered" : "Mark as Mastered"
                     }
                   >
                     <CheckCircle className="w-5 h-5" />
